@@ -16,5 +16,5 @@ int main() {
 	}
 	const auto end = std::chrono::system_clock::now();
 	const auto time_per_iteration = (end - start) / N;
-	std::cout << std::chrono::duration_cast<std::chrono::duration<double, std::micro>>(time_per_iteration).count() << "us / iter\n";
+	std::clog << std::chrono::duration_cast<std::chrono::duration<double, std::micro>>(time_per_iteration).count() << " us / iter\n";
 }
