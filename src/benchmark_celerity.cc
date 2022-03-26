@@ -11,10 +11,10 @@ constexpr int samples = 1000;
     q.slow_full_sync();
 }
 
-[[gnu::noinline]] void kernels_without_dependencies(celerity::distr_queue &q, const celerity::buffer<float> &,
-                                                    const celerity::experimental::host_object<void> &) {
+[[gnu::noinline]] void host_tasks_without_dependencies(celerity::distr_queue &q, const celerity::buffer<float> &,
+                                                       const celerity::experimental::host_object<void> &) {
     q.submit([](celerity::handler &cgh) {
-        cgh.parallel_for(global_range, [](celerity::item<1>) {});
+        cgh.host_task(global_range, [](celerity::partition<1>) {});
     });
     q.submit([](celerity::handler &cgh) {
         cgh.host_task(global_range, [](celerity::partition<1>) {});
@@ -22,11 +22,17 @@ constexpr int samples = 1000;
     q.slow_full_sync();
 }
 
-[[gnu::noinline]] void kernels_with_buffer_dependencies(celerity::distr_queue &q, const celerity::buffer<float> &buffer,
-                                                        const celerity::experimental::host_object<void> &) {
+[[gnu::noinline]] void
+host_tasks_with_buffer_dependencies(celerity::distr_queue &q, const celerity::buffer<float> &buffer,
+                                    const celerity::experimental::host_object<void> &) {
     q.submit([=](celerity::handler &cgh) {
-        celerity::accessor acc{buffer, cgh, celerity::access::one_to_one{}, celerity::write_only, celerity::no_init};
-        cgh.parallel_for(global_range, [=](celerity::item<1> it) { acc[it] = M_PIf; });
+        celerity::accessor acc{buffer, cgh, celerity::access::one_to_one{}, celerity::write_only_host_task,
+                               celerity::no_init};
+        cgh.host_task(global_range, [=](celerity::partition<1> it) {
+            for (size_t i = 0; i < it.get_subrange().range[0]; ++i) {
+                acc[it.get_subrange().offset.get(0) + i] *= 3.14;
+            }
+        });
     });
     q.submit([=](celerity::handler &cgh) {
         celerity::accessor acc{buffer, cgh, celerity::access::one_to_one{}, celerity::read_write_host_task};
@@ -39,8 +45,9 @@ constexpr int samples = 1000;
     q.slow_full_sync();
 }
 
-[[gnu::noinline]] void kernels_with_host_object_dependencies(celerity::distr_queue &q, const celerity::buffer<float> &,
-                                                             const celerity::experimental::host_object<void> &obj) {
+[[gnu::noinline]] void
+host_tasks_with_side_effect_dependencies(celerity::distr_queue &q, const celerity::buffer<float> &,
+                                         const celerity::experimental::host_object<void> &obj) {
     q.submit([=](celerity::handler &cgh) {
         celerity::experimental::side_effect eff{obj, cgh};
         cgh.host_task(global_range, [](celerity::partition<1> it) {});
@@ -70,7 +77,7 @@ int main() {
     celerity::buffer<float> buffer{global_range};
     celerity::experimental::host_object obj;
     benchmark("sync only", sync_only, q, buffer, obj);
-    benchmark("kernels without dependencies", kernels_without_dependencies, q, buffer, obj);
-    benchmark("kernels with buffer dependencies", kernels_with_buffer_dependencies, q, buffer, obj);
-    benchmark("kernels with host object dependencies", kernels_with_host_object_dependencies, q, buffer, obj);
+    benchmark("host tasks without dependencies", host_tasks_without_dependencies, q, buffer, obj);
+    benchmark("host tasks with buffer dependencies", host_tasks_with_buffer_dependencies, q, buffer, obj);
+    benchmark("host tasks with side effect dependencies", host_tasks_with_side_effect_dependencies, q, buffer, obj);
 }

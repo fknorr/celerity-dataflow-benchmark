@@ -12,22 +12,22 @@ constexpr int samples = 1000;
 
 [[gnu::noinline]] void kernels_without_dependencies(sycl::queue &q, sycl::buffer<float> &) {
     q.submit([](sycl::handler &cgh) {
-        cgh.parallel_for(global_range, [](sycl::item<1>) {});
+        cgh.parallel_for<class no_deps_1>(global_range, [](sycl::item<1>) {});
     });
     q.submit([](sycl::handler &cgh) {
-        cgh.parallel_for(global_range, [](sycl::item<1>) {});
+        cgh.parallel_for<class no_deps_2>(global_range, [](sycl::item<1>) {});
     });
     q.wait();
 }
 
 [[gnu::noinline]] void kernels_with_buffer_dependencies(sycl::queue &q, sycl::buffer<float> &buffer) {
     q.submit([&](sycl::handler &cgh) {
-        sycl::accessor acc{buffer, cgh, sycl::write_only, sycl::no_init};
-        cgh.parallel_for(global_range, [=](sycl::item<1> it) { acc[it] = M_PIf; });
+        sycl::accessor acc{buffer, cgh, sycl::write_only};
+        cgh.parallel_for<class buffer_deps_1>(global_range, [=](sycl::item<1> it) { acc[it] = 3.14f; });
     });
     q.submit([&](sycl::handler &cgh) {
         sycl::accessor acc{buffer, cgh, sycl::read_write};
-        cgh.parallel_for(global_range, [=](sycl::item<1> it) { acc[it] *= 2; });
+        cgh.parallel_for<class buffer_deps_2>(global_range, [=](sycl::item<1> it) { acc[it] *= 2; });
     });
     q.wait();
 }
@@ -51,6 +51,6 @@ int main() {
 
     sycl::buffer<float> buffer{global_range};
     benchmark("sync only", sync_only, q, buffer);
-    benchmark("kernels without dependencies", kernels_without_dependencies, q, buffer);
-    benchmark("kernels with buffer dependencies", kernels_with_buffer_dependencies, q, buffer);
+    benchmark("device kernels without dependencies", kernels_without_dependencies, q, buffer);
+    benchmark("device kernels with buffer dependencies", kernels_with_buffer_dependencies, q, buffer);
 }
