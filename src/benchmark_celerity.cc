@@ -3,6 +3,7 @@
 
 
 const celerity::range<1> global_range = 10000;
+constexpr int warmup = 100;
 constexpr int samples = 1000;
 
 
@@ -59,23 +60,47 @@ host_tasks_with_side_effect_dependencies(celerity::distr_queue &q, const celerit
     q.slow_full_sync();
 }
 
+int size, rank;
+
 template<typename Submit>
 void benchmark(const char *name, Submit submit, celerity::distr_queue &q, const celerity::buffer<float> &buffer,
                const celerity::experimental::host_object<void> &obj) {
-    const auto start = std::chrono::system_clock::now();
-    for (int i = 0; i < samples; ++i) {
+    std::vector<uint64_t> sample_ns(samples);
+    for (int i = 0; i < warmup; ++i) {
         submit(q, buffer, obj);
     }
-    const auto end = std::chrono::system_clock::now();
-    const auto time_per_iteration = (end - start) / samples;
-    CELERITY_INFO("{}: {} us / iter", name,
-                  std::chrono::duration_cast<std::chrono::duration<double, std::micro>>(time_per_iteration).count());
+    for (int i = 0; i < samples; ++i) {
+        const auto start = std::chrono::system_clock::now();
+        submit(q, buffer, obj);
+        const auto end = std::chrono::system_clock::now();
+        sample_ns[i] = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
+    }
+
+    std::vector<uint64_t> all_ranks_sample_ns(rank == 0 ? samples * size : 0);
+    MPI_Gather(sample_ns.data(), samples, MPI_UINT64_T, all_ranks_sample_ns.data(), samples, MPI_UINT64_T, 0,
+               MPI_COMM_WORLD);
+    if (rank == 0) {
+        fmt::print("{}", name);
+        for (int i = 0; i < all_ranks_sample_ns.size(); ++i) {
+            fmt::print("{}{}", i % samples == 0 ? ';' : ',', all_ranks_sample_ns[i]);
+        }
+        fmt::print("\n");
+    }
 }
 
-int main() {
+int main(int argc, char **argv) {
+    celerity::runtime::init(&argc, &argv);
+
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    if (rank == 0) {
+        fmt::print("benchmark;rank;samples...\n");
+    }
+
     celerity::distr_queue q;
     celerity::buffer<float> buffer{global_range};
     celerity::experimental::host_object obj;
+
     benchmark("sync only", sync_only, q, buffer, obj);
     benchmark("host tasks without dependencies", host_tasks_without_dependencies, q, buffer, obj);
     benchmark("host tasks with buffer dependencies", host_tasks_with_buffer_dependencies, q, buffer, obj);
