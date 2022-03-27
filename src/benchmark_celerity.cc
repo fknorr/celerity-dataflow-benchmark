@@ -7,36 +7,33 @@ constexpr int warmup = 100;
 constexpr int samples = 1000;
 
 
+[[gnu::noinline]] void reference_mpi_barrier(celerity::distr_queue &, const celerity::buffer<float> &,
+                                             const celerity::experimental::host_object<void> &) {
+    MPI_Barrier(MPI_COMM_WORLD);
+}
+
 [[gnu::noinline]] void sync_only(celerity::distr_queue &q, const celerity::buffer<float> &,
                                  const celerity::experimental::host_object<void> &) {
     q.slow_full_sync();
 }
 
-[[gnu::noinline]] void host_tasks_without_dependencies(celerity::distr_queue &q, const celerity::buffer<float> &,
-                                                       const celerity::experimental::host_object<void> &) {
-    q.submit([](celerity::handler &cgh) {
-        cgh.host_task(global_range, [](celerity::partition<1>) {});
-    });
-    q.submit([](celerity::handler &cgh) {
-        cgh.host_task(global_range, [](celerity::partition<1>) {});
-    });
-    q.slow_full_sync();
-}
-
 [[gnu::noinline]] void
-host_tasks_with_buffer_dependencies(celerity::distr_queue &q, const celerity::buffer<float> &buffer,
-                                    const celerity::experimental::host_object<void> &) {
+host_tasks_with_data_transfers(celerity::distr_queue &q, const celerity::buffer<float> &buffer,
+                               const celerity::experimental::host_object<void> &) {
     q.submit([=](celerity::handler &cgh) {
         celerity::accessor acc{buffer, cgh, celerity::access::one_to_one{}, celerity::write_only_host_task,
                                celerity::no_init};
         cgh.host_task(global_range, [=](celerity::partition<1> it) {
             for (size_t i = 0; i < it.get_subrange().range[0]; ++i) {
-                acc[it.get_subrange().offset.get(0) + i] *= 3.14;
+                acc[it.get_subrange().offset.get(0) + i] *= 3;
             }
         });
     });
+    constexpr auto flip_one_to_one = [](const celerity::chunk<1> ck) {
+        return celerity::subrange<1>{ck.global_size[0] - ck.offset[0] - ck.range[0], ck.range[0]};
+    };
     q.submit([=](celerity::handler &cgh) {
-        celerity::accessor acc{buffer, cgh, celerity::access::one_to_one{}, celerity::read_write_host_task};
+        celerity::accessor acc{buffer, cgh, flip_one_to_one, celerity::read_write_host_task};
         cgh.host_task(global_range, [=](celerity::partition<1> it) {
             for (size_t i = 0; i < it.get_subrange().range[0]; ++i) {
                 acc[it.get_subrange().offset.get(0) + i] *= 2;
@@ -47,8 +44,8 @@ host_tasks_with_buffer_dependencies(celerity::distr_queue &q, const celerity::bu
 }
 
 [[gnu::noinline]] void
-host_tasks_with_side_effect_dependencies(celerity::distr_queue &q, const celerity::buffer<float> &,
-                                         const celerity::experimental::host_object<void> &obj) {
+host_tasks_with_local_dependencies(celerity::distr_queue &q, const celerity::buffer<float> &,
+                                   const celerity::experimental::host_object<void> &obj) {
     q.submit([=](celerity::handler &cgh) {
         celerity::experimental::side_effect eff{obj, cgh};
         cgh.host_task(global_range, [](celerity::partition<1> it) {});
@@ -94,15 +91,15 @@ int main(int argc, char **argv) {
     MPI_Comm_size(MPI_COMM_WORLD, &size);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     if (rank == 0) {
-        fmt::print("benchmark;rank;samples...\n");
+        fmt::print("benchmark;samples...\n");
     }
 
     celerity::distr_queue q;
     celerity::buffer<float> buffer{global_range};
     celerity::experimental::host_object obj;
 
-    benchmark("sync only", sync_only, q, buffer, obj);
-    benchmark("host tasks without dependencies", host_tasks_without_dependencies, q, buffer, obj);
-    benchmark("host tasks with buffer dependencies", host_tasks_with_buffer_dependencies, q, buffer, obj);
-    benchmark("host tasks with side effect dependencies", host_tasks_with_side_effect_dependencies, q, buffer, obj);
+    benchmark("MPI_Barrier", reference_mpi_barrier, q, buffer, obj);
+    benchmark("slow_full_sync", sync_only, q, buffer, obj);
+    benchmark("slow_full_sync after data transfers", host_tasks_with_data_transfers, q, buffer, obj);
+    benchmark("slow_full_sync after local dependencies", host_tasks_with_local_dependencies, q, buffer, obj);
 }
