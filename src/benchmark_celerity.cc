@@ -88,11 +88,14 @@ void benchmark(const char *name, Submit submit, celerity::distr_queue &q, const 
     MPI_Gather(sample_ns.data(), samples, MPI_UINT64_T, all_ranks_sample_ns.data(), samples, MPI_UINT64_T, 0,
                MPI_COMM_WORLD);
     if (rank == 0) {
-        fmt::print("{}", name);
-        for (int i = 0; i < all_ranks_sample_ns.size(); ++i) {
-            fmt::print("{}{}", i % samples == 0 ? ';' : ',', all_ranks_sample_ns[i]);
-        }
-        fmt::print("\n");
+		double mean = std::accumulate(all_ranks_sample_ns.begin(), all_ranks_sample_ns.end(), 0.0)
+			/ all_ranks_sample_ns.size();
+		fmt::print("{:55} {:10.0f} ns\n", name, mean);
+        // fmt::print("{}", name);
+        // for (int i = 0; i < all_ranks_sample_ns.size(); ++i) {
+        //     fmt::print("{}{}", i % samples == 0 ? ';' : ',', all_ranks_sample_ns[i]);
+        // }
+        // fmt::print("\n");
     }
 }
 
@@ -101,9 +104,9 @@ int main(int argc, char **argv) {
 
     MPI_Comm_size(MPI_COMM_WORLD, &size);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-    if (rank == 0) {
-        fmt::print("benchmark;samples...\n");
-    }
+    // if (rank == 0) {
+    //     fmt::print("benchmark;samples...\n");
+    // }
 
     celerity::distr_queue q;
     celerity::buffer<float> buffer{global_range};
@@ -111,7 +114,7 @@ int main(int argc, char **argv) {
 
     benchmark("MPI_Barrier", reference_mpi_barrier, q, buffer, obj);
     benchmark("slow_full_sync", sync_only, q, buffer, obj);
-    benchmark("host_task pair with one-to-one data exchange", host_tasks_with_data_transfers, q, buffer, obj);
-    benchmark("host_task chain with side effects", host_task_chain_with_side_effects, q, buffer, obj);
-    benchmark("host_task chain with slow_full_sync", host_task_chain_with_syncs, q, buffer, obj);
+    //benchmark("host_task pair with one-to-one data exchange", host_tasks_with_data_transfers, q, buffer, obj);
+    //benchmark("host_task chain with side effects", host_task_chain_with_side_effects, q, buffer, obj);
+    //benchmark("host_task chain with slow_full_sync", host_task_chain_with_syncs, q, buffer, obj);
 }
